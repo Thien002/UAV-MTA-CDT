@@ -29,9 +29,6 @@ def takeoff(m,f):
     fc.arm(m,f)
     time.sleep(1.5)
     fc.takeoff(m, f, 2.5) #cất cánh lên 2.5m
-    time.sleep(5)
-
-
 
 if __name__ =="__main__":
     try:
@@ -41,7 +38,7 @@ if __name__ =="__main__":
         t0 = time.time()
         while time.time() - t0 < 20:
             _, alt_m = log.stream_data(m,f)
-            if time.time() - t0 > 8:
+            if time.time() - t0 > 5:
                 fc.send_body_velocity(m,0,0,0)
             time.sleep(0.05)
 

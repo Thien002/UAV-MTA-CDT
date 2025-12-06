@@ -1,0 +1,12 @@
+        m,f = connect()
+        wait_to_takeoff(m,f)
+        takeoff(m,f)
+        while not is_landing():
+            _, dz = log.stream_data(m,f)
+            dx, dy = detect.detect()
+            dt = t - prev_t
+            if time.time() - t0 > 10:
+                tracking(m,dx,dy,dz,dt)
+            time.sleep(0.05)
+
+        fc.land(m,f)

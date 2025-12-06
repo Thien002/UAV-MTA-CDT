@@ -18,7 +18,7 @@ class PID:
         self.prev_error = 0.0
         self.has_prev = False
 
-    def update(self, error, dt):
+    def commute(self, error, dt):
         if dt <= 0:
             d = 0.0
         else:
@@ -27,7 +27,7 @@ class PID:
         self.integral += error * dt
         u = self.kp * error + self.ki * self.integral + self.kd * d
 
-        # giới hạn output nếu cần
+        # giới hạn output
         if self.out_min is not None:
             u = max(self.out_min, u)
         if self.out_max is not None:
@@ -36,6 +36,10 @@ class PID:
         self.prev_error = error
         self.has_prev = True
         return u
+
+pid_x = PID(kp=0.005, ki=0.001, kd=0.001, out_min=-0.5, out_max=0.5)
+pid_y = PID(kp=0.002, ki=0.0005, kd=0.005, out_min=-0.5, out_max=0.5)
+pid_z = PID(kp=0.1, ki=0.0, kd=0.02, out_min=-0.4, out_max=0.4)
 
 def set_mode_guided(m,f):
     modes = m.mode_mapping()
@@ -102,7 +106,7 @@ def land(m,f):
         0,
         0,0,0,0,
         0,0,0
-    )
+    ) 
 
 def send_body_velocity(m, vx, vy, vz):
 
@@ -115,8 +119,9 @@ def send_body_velocity(m, vx, vy, vz):
         mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
     )
 
+    ts = int(time.time() * 1000) & 0xFFFFFFFF
     m.mav.set_position_target_local_ned_send(
-        0,
+        ts,
         m.target_system,
         m.target_component,
         mavutil.mavlink.MAV_FRAME_BODY_NED,
@@ -127,4 +132,9 @@ def send_body_velocity(m, vx, vy, vz):
         0,0
     )
 
-def tracking(dx,dy.dz):
+def tracking(m, dx, dy, dz, dt):
+    vx = pid_x.commute(dx, dt)
+    vy = pid_y.commute(dy, dt)
+    alpha = abs((90 - dx)/180) + abs((160 - dy)/320) #Hệ số điều chỉnh
+    vz = alpha * pid_z.commute(dz, dt)
+    send_body_velocity(m,vx,vy,vz)
