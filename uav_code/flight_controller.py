@@ -134,8 +134,8 @@ class FlightController:
             mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE |
             mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE |
 
-            mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE |
-            mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
+            # mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
         )
 
         ts = int(time.time() * 1000) & 0xFFFFFFFF
@@ -145,7 +145,6 @@ class FlightController:
             self.m.target_component,
             mavutil.mavlink.MAV_FRAME_BODY_NED,
             type_mask,
-            #0b0000111111000111
             0, 0, 0,          
             vx, vy, vz,       
             0, 0, 0,          

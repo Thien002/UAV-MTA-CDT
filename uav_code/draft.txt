@@ -1,0 +1,2 @@
+pgrep -af "main|detect"
+pkill -f "main|detect"
