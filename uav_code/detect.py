@@ -31,7 +31,7 @@ def recv_udp():
 
     if t == "mode":
         m = msg.get("mode")
-        if m in ("Take off", "Following", "Landing", "Stop"):
+        if m in ("Take off", "Following", "Landing", "Stop", "Landing 0.7"):
             recv_udp.mode = m
 
     elif t == "altitude":
@@ -123,6 +123,7 @@ def detect(mode_text) -> dict:
     cv2.putText(annotated, f"FPS:{detect.fps_now}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.drawMarker(annotated, (int(cam_cx), int(cam_cy)), (0, 255, 255), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=2)
     cv2.putText(annotated,f"Mode: {mode_text}",(10, 630),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"Time: {time.time():.1f}",(10, 580),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
     # cv2.putText(annotated,f"dz: {dz}",(10, 600),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
 
     if bbox is not None:

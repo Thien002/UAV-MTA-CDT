@@ -46,7 +46,7 @@ class UltrasonicReader:
             try:
                 n = self.ser.in_waiting
                 if n <= 0:
-                    time.sleep(0.001)
+                    time.sleep(0.01)
                     continue
                 self.buf += self.ser.read(n)
                 if len(self.buf) > 1024:
@@ -61,8 +61,8 @@ class UltrasonicReader:
                         continue
                     dist = ((hi << 8) | lo) / 1000.0
                     del self.buf[:4]
-                    if dist < self.min_valid_m or dist > self.max_valid_m:
-                        continue
+                    # if dist < self.min_valid_m or dist > self.max_valid_m:
+                    #     continue
                     now = time.time()
                     with self._lock:
                         self._distance = dist

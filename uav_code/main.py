@@ -81,7 +81,7 @@ def fusion_alt():
     
     ultra, age = ultra_reader.latest()
     t = time.time()
-    print(f"{t}, ultra={ultra:.3f}, age={age:.3f}, baro={baro}")
+    # print(f"{t}, ultra={ultra:.3f}, age={age:.3f}, baro={baro}")
 
     if ultra == 0:
         return baro
@@ -144,19 +144,34 @@ if __name__ == "__main__":
         ultra_reader.start()
 
         wait_to_takeoff()
-        takeoff(4) #cất cánh lên 4m
+        takeoff(2.5) #cất cánh lên 4m
         vx = vy = vz = 0.0
         t0 = time.time()
-        while time.time() - t0 < 20: #Thời gian detect
+        while time.time() - t0 < 60: #Thời gian detect
             pkt, dt, d_flag = recv_udp()
             dz = fusion_alt()
             
-            if d_flag:
-                vx, vy, vz = fc.pid_commute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
-                fc.send_body_velocity(vx, vy, vz)
-            if dz < 0.8:
-                fc.send_body_velocity(0, 0, 0.5)
-                break
+            if dz < 1.0:
+                print(f"abs(dx): {abs(pkt['dx'])}")
+                print(f"abs(dy): {abs(pkt['dy'])}")
+                if (abs(pkt["dx"]) < 64.0) and (abs(pkt["dy"]) < 48.0) and (pkt["found"] == True):
+                    print("ok 0.7")
+                    send_mode("Landing 0.7")
+                    t0 = time.time()
+                    while time.time() - t0 < 3:
+                        fc.send_body_velocity(0.01,0.01,0.4)
+                        time.sleep(0.02)
+                    break
+
+                else:
+                    print("else")
+                    if d_flag:
+                        vx, vy, vz = fc.pid_commute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
+                        fc.send_body_velocity(vx, vy, 0.0)
+            else:
+                if d_flag:
+                    vx, vy, vz = fc.pid_commute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
+                    fc.send_body_velocity(vx, vy, vz)
             time.sleep(0.01)
         
     except Exception as e:
