@@ -17,7 +17,7 @@ detect_addr = (UDP_IP, DETECT_PORT)
 sock.bind(("0.0.0.0", MAIN_PORT))
 sock.setblocking(False)
 
-def send_mode(mode: str, repeat=5, interval_s=0.1):
+def send_mode(mode: str, repeat=3, interval_s=0.1):
     pkt = {
         "type": "mode",
         "mode": mode
@@ -27,20 +27,26 @@ def send_mode(mode: str, repeat=5, interval_s=0.1):
         sock.sendto(data, detect_addr)
         time.sleep(interval_s)
 
-def send_altitude(altitude: float, period_s=0.1):
-    if not hasattr(send_altitude, "last_t"):
-        send_altitude.last_t = 0.0
+def send_udp(dz, pitchRC, rollRC, throttleRC, period_s=0.1):
+    if not hasattr(send_udp, "last_t"):
+        send_udp.last_t = 0.0
 
     t_now = time.time()
-    if t_now - send_altitude.last_t < period_s:
+    if t_now - send_udp.last_t < period_s:
         return
 
-    send_altitude.last_t = t_now
+    send_udp.last_t = t_now
+
     pkt = {
-        "type": "altitude",
-        "altitude": float(altitude)
+        "type": "controlRC",
+        "dz": float(dz),
+        "pitchRC": int(pitchRC),
+        "rollRC": int(rollRC),
+        "throttleRC": int(throttleRC),
     }
+
     sock.sendto(json.dumps(pkt).encode("utf-8"), detect_addr)
+
 
 def recv_udp():
     if not hasattr(recv_udp, "last_msg"):
@@ -117,13 +123,15 @@ def takeoff(alt):
         if snap is not None:
             t_ms, ch6, baro, roll, pitch, yaw = snap
         if baro >= 0.95*alt:
-            time.sleep(3)
+            time.sleep(1)
             send_mode("Following")
             break
         time.sleep(0.02)
 
     fc.send_manual_stick(0,0,0)
+    time.sleep(0.02)
     fc.set_mode_loiter()
+    
 
 def landing():
     send_mode("Landing")
@@ -148,34 +156,33 @@ if __name__ == "__main__":
 
         wait_to_takeoff()
         takeoff(2.5) #cất cánh lên 2.5m
-        vx = vy = vz = 0.0
+        pitchRC = rollRC = throttleRC = 0
         t0 = time.time()
         while time.time() - t0 < 60: #Thời gian detect
             pkt, dt, d_flag = recv_udp()
             dz = fusion_alt()
-            send_altitude(dz)
-            
-            if dz < 1.0:
+            if dz < 0.7:
                 print(f"abs(dx): {abs(pkt['dx'])}")
                 print(f"abs(dy): {abs(pkt['dy'])}")
                 if (abs(pkt["dx"]) < 64.0) and (abs(pkt["dy"]) < 48.0) and (pkt["found"] == True):
-                    print("ok 0.7")
                     send_mode("Landing 0.7")
                     t0 = time.time()
                     while time.time() - t0 < 3:
-                        fc.send_manual_stick(0,0,0)
+                        fc.send_manual_stick(0,0,-100)
                         time.sleep(0.02)
                     break
 
                 else:
                     print("else")
                     if d_flag:
-                        vx, vy, vz = fc.pid_commute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
-                        fc.send_manual_stick(vx, vy, 0)
+                        pitchRC, rollRC, throttleRC = fc.pid_compute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
+                        fc.send_manual_stick(pitchRC, rollRC, 0)
             else:
                 if d_flag:
-                    vx, vy, vz = fc.pid_commute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
-                fc.send_manual_stick(vx, vy, 0)
+                    pitchRC, rollRC, throttleRC = fc.pid_compute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
+                    # print(f"time: {time.time():.1f}, dx: {pkt['dx']}, pitch: {pitchRC}, dy: {pkt['dy']}, roll: {rollRC}")
+                fc.send_manual_stick(pitchRC, rollRC, 0)
+            send_udp(dz,pitchRC, rollRC, throttleRC)
             time.sleep(0.02)
         
     except Exception as e:

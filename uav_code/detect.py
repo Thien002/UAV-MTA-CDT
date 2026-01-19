@@ -20,27 +20,22 @@ def send_udp(pkt: dict):
 def recv_udp():
     if not hasattr(recv_udp, "mode"):
         recv_udp.mode = "Idle"
-        recv_udp.altitude = 0.0
+        recv_udp.last_msg = None
 
     try:
         msg = json.loads(sock.recvfrom(256)[0].decode("utf-8"))
     except (BlockingIOError, OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return recv_udp.mode, recv_udp.altitude
+        return recv_udp.mode, recv_udp.last_msg
 
     t = msg.get("type")
 
     if t == "mode":
-        m = msg.get("mode")
-        if m in ("Take off", "Following", "Landing", "Stop", "Landing 0.7"):
-            recv_udp.mode = m
+        recv_udp.mode = msg.get("mode")
 
-    elif t == "altitude":
-        try:
-            recv_udp.altitude = float(msg.get("altitude"))
-        except (TypeError, ValueError):
-            pass
+    elif t == "controlRC":
+        recv_udp.last_msg = msg
 
-    return recv_udp.mode, recv_udp.altitude
+    return recv_udp.mode, recv_udp.last_msg
 
 # ================= Model / Camera =================
 model = YOLO("models/detect_v1.pt")
@@ -60,13 +55,21 @@ _ = model.predict(dummy,conf=0.4,imgsz=320,device="cuda",half=True,verbose=False
 msg = {"seq": -1,"found": False,"dx": 0,"dy": 0, "conf": 0}
 send_udp(msg)
 
-def detect(mode_text, dz) -> dict:
+def detect(mode_text, controlRC) -> dict:
     if not hasattr(detect, "frame_id"):
         detect.frame_id = 0
         detect.prev_t = 0.0
         detect.fps_now = 0
         detect.seq = 0
 
+    if controlRC is None:
+        controlRC = {
+            "dz": 0,
+            "pitchRC": 0,
+            "rollRC": 0,
+            "throttleRC": 0
+        }
+        
     dxc = dyc = None
     best_conf = None
     obj_cx = obj_cy = None
@@ -124,7 +127,10 @@ def detect(mode_text, dz) -> dict:
     cv2.drawMarker(annotated, (int(cam_cx), int(cam_cy)), (0, 255, 255), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=2)
     cv2.putText(annotated,f"Mode: {mode_text}",(10, 630),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
     cv2.putText(annotated,f"Time: {time.time():.1f}",(10, 580),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
-    cv2.putText(annotated,f"dz: {dz}",(10, 600),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"dz: {controlRC['dz']}",(10, 600),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"pitchRC(x): {controlRC['pitchRC']}",(10, 500),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"rollRC(y): {controlRC['rollRC']}",(10, 530),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"throttleRC(z): {controlRC['throttleRC']}",(10, 560),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
 
     if bbox is not None:
         x1, y1, x2, y2 = bbox
@@ -136,7 +142,7 @@ def detect(mode_text, dz) -> dict:
         cv2.putText(annotated, f"conf={best_conf:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 
     out.write(annotated)
-
+    # print(f"time: {time.time():.1f}, dx: {dxc:.1f}, dy: {dyc:.1f}, pitchRC: {controlRC['pitchRC']}, rollRC: {controlRC['rollRC']}")
     pkt = {
         "seq": detect.seq,
         "found": found,
@@ -155,16 +161,16 @@ def close():
 if __name__ == "__main__":
     try:
         while True:
-            mode, dz = recv_udp()
+            mode, controlRC = recv_udp()
             if mode == "Stop":
                 break
             elif  mode == "Idle":
                 time.sleep(0.02)
                 continue
 
-            pkt = detect(mode, dz)
-            # pkt = detect(mode)
-            send_udp(pkt)
+            pkt = detect(mode, controlRC)
+            if mode == "Following":
+                send_udp(pkt)
 
     except: 
         pass
