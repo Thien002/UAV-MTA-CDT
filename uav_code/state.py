@@ -8,6 +8,8 @@ class state:
         self.m = m
         self.ch6 = None
         self.alt = None
+        self.lat = None
+        self.lon = None
         self.roll = None
         self.pitch = None
         self.yaw = None
@@ -23,7 +25,7 @@ class state:
         self._last_snapshot = None
 
         self._log_file = f
-        self._log_file.write("t_ms,ch6,alt,roll,pitch,yaw\n")
+        self._log_file.write("t_ms,ch6,alt,lat,lon,roll,pitch,yaw\n")
 
     def _set_message_interval(self, msg_id, hz = 10):
         if hz <= 0:
@@ -74,6 +76,8 @@ class state:
 
             elif mtype == "GLOBAL_POSITION_INT":
                 self.alt = msg.relative_alt / 1000.0
+                self.lat = msg.lat / 1e7
+                self.lon = msg.lon / 1e7
                 self._has_new_gpos = True
 
             elif mtype == "ATTITUDE":
@@ -96,6 +100,8 @@ class state:
                 t_ms,
                 self.ch6,
                 self.alt,
+                self.lat,
+                self.lon,
                 self.roll,
                 self.pitch,
                 self.yaw,
@@ -111,7 +117,7 @@ class state:
 
             # ghi log
             self._log_file.write(
-                f"{t_ms},{self.ch6},{self.alt},{self.roll},{self.pitch},{self.yaw}\n"
+                f"{t_ms},{self.ch6},{self.alt},{self.lat},{self.lon},{self.roll},{self.pitch},{self.yaw}\n"
             )
 
         if self._ready:

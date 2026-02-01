@@ -27,7 +27,7 @@ def send_mode(mode: str, repeat=3, interval_s=0.1):
         sock.sendto(data, detect_addr)
         time.sleep(interval_s)
 
-def send_udp(dz, pitchRC, rollRC, throttleRC, period_s=0.1):
+def send_udp(dz, vx, vy, vz, period_s=0.1):
     if not hasattr(send_udp, "last_t"):
         send_udp.last_t = 0.0
 
@@ -40,9 +40,15 @@ def send_udp(dz, pitchRC, rollRC, throttleRC, period_s=0.1):
     pkt = {
         "type": "controlRC",
         "dz": float(dz),
-        "pitchRC": int(pitchRC),
-        "rollRC": int(rollRC),
-        "throttleRC": int(throttleRC),
+        "vx": float(vx),
+        "vy": float(vy),
+        "vz": float(vz),
+        "kpx": fc.pid_x.kp,
+        "kix": fc.pid_x.ki,
+        "kdx": fc.pid_x.kd,
+        "kpy": fc.pid_y.kp,
+        "kiy": fc.pid_y.ki,
+        "kdy": fc.pid_y.kd
     }
 
     sock.sendto(json.dumps(pkt).encode("utf-8"), detect_addr)
@@ -70,7 +76,7 @@ def recv_udp():
     return recv_udp.last_msg, recv_udp.dt, True #Có dữ liệu mới cập nhật
 
 
-def connect(port="/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A5XK3RJT-if00-port0", baud=57600):
+def connect(port="/dev/serial/by-id/usb-ArduPilot_Pixhawk6X_49002D001551333034383239-if00", baud=57600):
     filename = time.strftime("logs/%Y_%m_%d_%H_%M.csv")
     f = open(filename, "w")
     f.write(f"Connecting to {port} @ {baud}...\n")
@@ -83,11 +89,10 @@ def fusion_alt():
     snap = st.poll()
     baro = None
     if snap is not None:
-        t_ms, ch6, baro, roll, pitch, yaw = snap
+        t_ms, ch6, baro, lat, lon, roll, pitch, yaw = snap
     
     ultra, age = ultra_reader.latest()
     t = time.time()
-    # print(f"{t}, ultra={ultra:.3f}, age={age:.3f}, baro={baro}")
 
     if ultra == 0:
         return baro
@@ -107,7 +112,7 @@ def wait_to_takeoff():
             fc.set_mode_guided()
             is_start = False
         if snap is not None:
-            t_ms, ch6, baro, roll, pitch, yaw = snap
+            t_ms, ch6, baro, lat, lon, roll, pitch, yaw = snap
             if ch6 == 2000:
                 send_mode("Take off")
                 break
@@ -121,21 +126,28 @@ def takeoff(alt):
         snap = st.poll()
         baro = None
         if snap is not None:
-            t_ms, ch6, baro, roll, pitch, yaw = snap
+            t_ms, ch6, baro, lat, lon, roll, pitch, yaw = snap
         if baro >= 0.95*alt:
             time.sleep(1)
             send_mode("Following")
             break
         time.sleep(0.02)
-
-    fc.send_manual_stick(0,0,0)
-    time.sleep(0.02)
-    fc.set_mode_loiter()
+    print("HOVER")
+    f.write("MODE: HOVER\n")
+    time.sleep(3)
+    print("FOLLOWING")
+    f.write("MODE: FOLLOWING\n")
     
 
 def landing():
     send_mode("Landing")
     fc.land()
+
+def close():
+        st.stop_stream()
+        fc.close()
+        m.close()
+        send_mode("Stop")
 
 if __name__ == "__main__":
     ultra_reader = None
@@ -143,7 +155,6 @@ if __name__ == "__main__":
         m, f = connect()
         st = state(m, f)
         fc = FlightController(m, f)
-
         # ==== Start ultrasonic thread ====
         ultra_reader = UltrasonicReader(
             port="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
@@ -156,33 +167,34 @@ if __name__ == "__main__":
 
         wait_to_takeoff()
         takeoff(2.5) #cất cánh lên 2.5m
-        pitchRC = rollRC = throttleRC = 0
+        vx = vy = vz = 0.0
         t0 = time.time()
         while time.time() - t0 < 60: #Thời gian detect
             pkt, dt, d_flag = recv_udp()
             dz = fusion_alt()
-            if dz < 0.7:
-                print(f"abs(dx): {abs(pkt['dx'])}")
-                print(f"abs(dy): {abs(pkt['dy'])}")
+            fc.update_pid_from_keyboard()
+            if dz < 0.6:
                 if (abs(pkt["dx"]) < 64.0) and (abs(pkt["dy"]) < 48.0) and (pkt["found"] == True):
-                    send_mode("Landing 0.7")
+                    send_mode("Landing 0.6")
                     t0 = time.time()
                     while time.time() - t0 < 3:
-                        fc.send_manual_stick(0,0,-100)
-                        time.sleep(0.02)
+                        dz = fusion_alt()
+                        if dz < 0.2:
+                            break
+                        fc.send_body_velocity(0,0,0.4)
+                        time.sleep(0.1)
                     break
 
                 else:
-                    print("else")
                     if d_flag:
-                        pitchRC, rollRC, throttleRC = fc.pid_compute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
-                        fc.send_manual_stick(pitchRC, rollRC, 0)
+                        vx, vy, vz = fc.pid_compute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
+                        fc.send_body_velocity(vx, vy, 0)
             else:
                 if d_flag:
-                    pitchRC, rollRC, throttleRC = fc.pid_compute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
-                    # print(f"time: {time.time():.1f}, dx: {pkt['dx']}, pitch: {pitchRC}, dy: {pkt['dy']}, roll: {rollRC}")
-                fc.send_manual_stick(pitchRC, rollRC, 0)
-            send_udp(dz,pitchRC, rollRC, throttleRC)
+                    vx, vy, vz = fc.pid_compute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
+                    print(f"time:{time.time():.1f}, dx:{pkt['dx']}, vx:{vx:.2f}\tdy:{pkt['dy']}, vy:{vy:.2f}\tdz:{dz:.2f}, vz:{vz:.2f}")
+                    fc.send_body_velocity(vx, vy, vz)
+            send_udp(dz,vx,vy,vz)
             time.sleep(0.02)
         
     except Exception as e:
@@ -196,7 +208,6 @@ if __name__ == "__main__":
                 ultra_reader.stop()
             except Exception:
                 pass
+        
+        close()
 
-        st.stop_stream()
-        m.close()
-        send_mode("Stop")

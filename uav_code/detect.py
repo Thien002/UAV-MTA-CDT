@@ -61,14 +61,12 @@ def detect(mode_text, controlRC) -> dict:
         detect.prev_t = 0.0
         detect.fps_now = 0
         detect.seq = 0
-
     if controlRC is None:
         controlRC = {
-            "dz": 0,
-            "pitchRC": 0,
-            "rollRC": 0,
-            "throttleRC": 0
+        "dz":0, "vx":0, "vy":0, "vz":0,
+        "kpx":0, "kix":0, "kdx":0, "kpy":0, "kiy":0, "kdy":0
         }
+
         
     dxc = dyc = None
     best_conf = None
@@ -126,11 +124,12 @@ def detect(mode_text, controlRC) -> dict:
     cv2.putText(annotated, f"FPS:{detect.fps_now}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.drawMarker(annotated, (int(cam_cx), int(cam_cy)), (0, 255, 255), markerType=cv2.MARKER_CROSS, markerSize=20, thickness=2)
     cv2.putText(annotated,f"Mode: {mode_text}",(10, 630),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
-    cv2.putText(annotated,f"Time: {time.time():.1f}",(10, 580),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
-    cv2.putText(annotated,f"dz: {controlRC['dz']}",(10, 600),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
-    cv2.putText(annotated,f"pitchRC(x): {controlRC['pitchRC']}",(10, 500),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
-    cv2.putText(annotated,f"rollRC(y): {controlRC['rollRC']}",(10, 530),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
-    cv2.putText(annotated,f"throttleRC(z): {controlRC['throttleRC']}",(10, 560),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    # cv2.putText(annotated,f"Time: {time.time():.1f}",(10, 580),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"dz: {controlRC['dz']}",(10, 590),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"vx: {controlRC['vx']:.2f}",(10, 500),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"vy: {controlRC['vy']:.2f}",(10, 530),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    cv2.putText(annotated,f"vz: {controlRC['vz']:.2f}",(10, 560),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
+    # cv2.putText(annotated,f"kpx:{controlRC['kpx']} kix:{controlRC['kix']} kdx:{controlRC['kdx']} kpy:{controlRC['kpy']} kiy:{controlRC['kiy']} kdy:{controlRC['kdy']}",(10, 610),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0, 0, 0),2)
 
     if bbox is not None:
         x1, y1, x2, y2 = bbox
@@ -142,7 +141,7 @@ def detect(mode_text, controlRC) -> dict:
         cv2.putText(annotated, f"conf={best_conf:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 
     out.write(annotated)
-    # print(f"time: {time.time():.1f}, dx: {dxc:.1f}, dy: {dyc:.1f}, pitchRC: {controlRC['pitchRC']}, rollRC: {controlRC['rollRC']}")
+    print(f"time: {time.time():.1f}, dx: {dxc:.1f}, dy: {dyc:.1f}, vx: {controlRC['vx']:.2f}, vy: {controlRC['vy']:.2f}, vz: {controlRC['vz']:.2f}")
     pkt = {
         "seq": detect.seq,
         "found": found,

@@ -1,0 +1,6 @@
+Connecting to /dev/serial/by-id/usb-ArduPilot_Pixhawk6X_49002D001551333034383239-if00 @ 57600...
+HEARTBEAT received: 1, 0
+t_ms,ch6,alt,lat,lon,roll,pitch,yaw
+258,1000,0.616,21.0484411,105.786342,0.9,-0.1,57.4
+Lỗi xảy ra: too many values to unpack (expected 6)
+Landing...

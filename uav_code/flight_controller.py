@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import time
+import sys, select
 from pymavlink import mavutil
 
 class PID:
@@ -25,10 +26,10 @@ class PID:
             d = (error - self.prev_error) / dt if self.has_prev else 0.0
 
         self.integral += error * dt
-        if self.integral > 100:
-            self.integral = 100
-        elif self.integral < -100:
-            self.integral = -100
+        if self.integral > 0.15:
+            self.integral = 0.15
+        elif self.integral < -0.15:
+            self.integral = -0.15
 
         u = self.kp/i * error + self.ki * self.integral + self.kd * d
 
@@ -46,15 +47,23 @@ class FlightController:
     def __init__(self, m, f):
         self.m = m
         self.log_file = f
+        #File ghi vận tốc
+        filename = time.strftime("logs/velocity_%Y_%m_%d_%H_%M.csv")
+        self.vel_file = open(filename, "w")
+        self.vel_file.write("t_ms,vx,vy,vz\n")
+
         self.dxm_old = 0.0
         self.dym_old = 0.0
         # PID cho tracking
-        self.pid_x = PID(kp=50, ki=0.0, kd=0.0,
-                         out_min=-150.0, out_max=150.0)
-        self.pid_y = PID(kp=50, ki=0.0, kd=0.0,
-                         out_min=-150.0, out_max=150.0)
+        self.pid_x = PID(kp=0.5, ki=0.0, kd=0.0,
+                         out_min=-1.5, out_max=1.5)
+        self.pid_y = PID(kp=0.4, ki=0.0, kd=0.0,
+                         out_min=-1.5, out_max=1.5)
     def _log(self, msg):
         self.log_file.write(msg + "\n")
+
+    def close(self):
+        self.vel_file.close()
 
     def set_mode_guided(self):
         modes = self.m.mode_mapping()
@@ -76,6 +85,7 @@ class FlightController:
             hb = self.m.recv_match(type="HEARTBEAT", blocking=True, timeout=1)
             if hb and hb.custom_mode == guided_id:
                 self._log("Mode = GUIDED")
+                print("MODE: GUIDED")
                 return True
 
         self._log("Timeout switching to GUIDED")
@@ -101,6 +111,7 @@ class FlightController:
             hb = self.m.recv_match(type="HEARTBEAT", blocking=True, timeout=1)
             if hb and hb.custom_mode == loiter_id:
                 self._log("Mode = LOITER")
+                print("MODE: LOITER")
                 return True
 
         self._log("Timeout switching to LOITER")
@@ -162,7 +173,7 @@ class FlightController:
             mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE |
             mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE |
 
-            mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE |
+            # mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
             mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
         )
 
@@ -179,65 +190,64 @@ class FlightController:
             0, 0
         )
 
-    def send_manual_stick(self, pitch, roll, throttle):
-        """
-        Gửi trực tiếp stick MANUAL_CONTROL.
-        Giới hạn biên ±25% (±250).
-        pitch, roll, yaw: [-1000, 1000]
-        throttle: [0, 1000], 500 ~ hover
-        """
 
-        STICK_MAX = 200  # 25% của 1000
+    def update_pid_from_keyboard(self):
+        if select.select([sys.stdin], [], [], 0)[0]:   # không chặn
+            cmd = sys.stdin.readline().strip().lower()
+            parts = cmd.split()
+            if len(parts) != 2:
+                print("Ví dụ: kpx 60")
+                return
 
-        # Chặn biên pitch, roll, yaw
-        pitch = max(min(int(pitch), STICK_MAX), -STICK_MAX)
-        roll  = max(min(int(roll),  STICK_MAX), -STICK_MAX)
+            key, val = parts[0], float(parts[1])
 
-        # Chặn biên throttle quanh 500
-        throttle = max(min(int(500 + throttle), 500 + STICK_MAX), 500 - STICK_MAX)
+            if key == "kpx":
+                self.pid_x.kp = val
+            elif key == "kix":
+                self.pid_x.ki = val
+            elif key == "kdx":
+                self.pid_x.kd = val
+            elif key == "kpy":
+                self.pid_y.kp = val
+            elif key == "kiy":
+                self.pid_y.ki = val
+            elif key == "kdy":
+                self.pid_y.kd = val
+            else:
+                print("Sai tham số")
 
-        # Gửi MAVLink MANUAL_CONTROL
-        self.m.mav.manual_control_send(
-            self.m.target_system,
-            pitch,      # x: pitch
-            roll,       # y: roll
-            throttle,   # z: throttle
-            32767,      # ignore yaw
-            0
-        )
+            print(f"Đã cập nhật {key} = {val}")
 
-    def RCthrottle_compute(self, dxp, dyp, dz, found, xmax = 320.0, ymax=240.0):
+
+
+    def velocity_z(self, dxp, dyp, dz, found, xmax = 320.0, ymax=240.0, vzmax = 0.5):
         if dz != 0 and found:
             s = (dxp/xmax)*(dxp/xmax) + (dyp/ymax)*(dyp/ymax)
             alpha =  0.0 if s >= 1.0 else (1.0 - s)*(1.0 - s)
-            if dz < 1: K = 75
-            else: K = 50
-            return -K*alpha*dz
+            if dz < 1.5: K = 0.09
+            else: K = 0.07
+
+            vz = K * alpha * dz
+
+            # Giới hạn trong [-vzmax, vzmax]
+            vz = max(-vzmax, min(vz, vzmax))
+            return vz
         else:
             return 0 #chỉnh cho z mượt khi không detect được
     
     def pid_compute(self, dx, dy, dz, dt, found):
-        dxm = dz*dx/444
+        if dx == 0:
+            dxm = 0
+        else:       
+            dxm = dz*dx/444 + 0.15
         dym = dz*dy/444
-        # if found:
-        #     dxm = dz*dx/444
-        #     dym = dz*dy/444
-        #     # dxm = 0 if abs(dx) < 0.1*640 else dz*dx/444
-        #     # dym = 0 if abs(dy) < 0.1*480 else dz*dy/444
-
-        #     # # lưu lại để lần sau dùng
-        #     self.dxm_old = dxm
-        #     self.dym_old = dym
-        # else:
-        #     # dùng lại giá trị cũ
-        #     dxm = self.dxm_old
-        #     dym = self.dym_old
             
         if dz < 1.2: i = 2
         else: i = 1
-        pitchRC = self.pid_x.compute(dxm, dt, i)
-        rollRC = self.pid_y.compute(dym, dt, i)
-        throttleRC = self.RCthrottle_compute(dx, dy, dz, found)
-        # print(f"time: {time.time():.1f}, dx: {dxm}:.3f, vx:{vx}:.3f, dy:{dym}:.3f, vy:{vy}:.3f, dz:{dz}:.3f, vz:{vz}:.3f")
-        return pitchRC,rollRC,throttleRC
 
+        vx = self.pid_x.compute(dxm, dt, i)
+        vy = self.pid_y.compute(dym, dt, i)
+        vz = self.velocity_z(dx, dy, dz, found)
+
+        self.vel_file.write(f"{time.monotonic():.3f},{vx:.3f},{vy:.3f},{vz:.3f}\n")
+        return vx,vy,vz
