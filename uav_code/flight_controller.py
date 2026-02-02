@@ -189,6 +189,9 @@ class FlightController:
             0, 0, 0,
             0, 0
         )
+        
+        self.vel_file.write(f"{time.monotonic():.3f},{vx:.3f},{vy:.3f},{vz:.3f}\n")
+        
 
 
     def update_pid_from_keyboard(self):
@@ -242,12 +245,15 @@ class FlightController:
             dxm = dz*dx/444 + 0.15
         dym = dz*dy/444
             
-        if dz < 1.2: i = 2
-        else: i = 1
+        # if dz < 1.2: i = 2
+        # else: i = 1
+        if dz < 1:
+            i = 0.5
+        else:
+            i = 1
 
         vx = self.pid_x.compute(dxm, dt, i)
         vy = self.pid_y.compute(dym, dt, i)
         vz = self.velocity_z(dx, dy, dz, found)
 
-        self.vel_file.write(f"{time.monotonic():.3f},{vx:.3f},{vy:.3f},{vz:.3f}\n")
         return vx,vy,vz

@@ -1,12 +1,26 @@
 import math
 import time
 from pymavlink import mavutil
+from HCSR04_thread import UltrasonicReader
 
 class state:
 
     def __init__(self, m, f):
         self.m = m
+
+        #Ultra
+        self.ultra_obj = UltrasonicReader(
+            port="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+            baudrate=9600,
+            timeout=0.05,
+            min_valid_m=0.05,
+            max_valid_m=4.0,
+        )
+        self.ultra_obj.start()
+
         self.ch6 = None
+        self.baro = None
+        self.ultra = None
         self.alt = None
         self.lat = None
         self.lon = None
@@ -25,7 +39,7 @@ class state:
         self._last_snapshot = None
 
         self._log_file = f
-        self._log_file.write("t_ms,ch6,alt,lat,lon,roll,pitch,yaw\n")
+        self._log_file.write("t_ms,ch6,alt,baro,ultra,lat,lon,roll,pitch,yaw\n")
 
     def _set_message_interval(self, msg_id, hz = 10):
         if hz <= 0:
@@ -58,7 +72,27 @@ class state:
         self._set_message_interval(mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 0)
         self._set_message_interval(mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE, 0)
 
+        try:
+            self.ultra_obj.stop()
+        except:
+            pass
+
         self._log_file.close()
+
+    def _fusion_alt(self):
+        self.ultra, _ = self.ultra_obj.latest()
+
+        if self.baro is None:
+            return None
+
+        if self.ultra == 0 or self.ultra is None:
+            return self.baro
+        elif self.ultra <= 1.5:
+            return self.ultra
+        elif self.ultra < 2.0:
+            return 0.6 * self.ultra + 0.4 * self.baro
+        else:
+            return self.baro
 
     def poll(self):
         msg = self.m.recv_match(
@@ -75,7 +109,7 @@ class state:
                 self._has_new_rc = True
 
             elif mtype == "GLOBAL_POSITION_INT":
-                self.alt = msg.relative_alt / 1000.0
+                self.baro = msg.relative_alt / 1000.0
                 self.lat = msg.lat / 1e7
                 self.lon = msg.lon / 1e7
                 self._has_new_gpos = True
@@ -95,6 +129,8 @@ class state:
             self._has_new_att):
 
             t_ms = int((time.monotonic() - self._t0) * 1000)
+            # update altitude
+            self.alt = self._fusion_alt()
 
             snapshot = (
                 t_ms,
@@ -117,7 +153,7 @@ class state:
 
             # ghi log
             self._log_file.write(
-                f"{t_ms},{self.ch6},{self.alt},{self.lat},{self.lon},{self.roll},{self.pitch},{self.yaw}\n"
+                f"{t_ms},{self.ch6},{self.alt},{self.baro},{self.ultra},{self.lat},{self.lon},{self.roll},{self.pitch},{self.yaw}\n"
             )
 
         if self._ready:

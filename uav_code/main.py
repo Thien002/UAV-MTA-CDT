@@ -85,23 +85,6 @@ def connect(port="/dev/serial/by-id/usb-ArduPilot_Pixhawk6X_49002D00155133303438
     f.write(f"HEARTBEAT received: {m.target_system}, {m.target_component}\n")
     return m, f
 
-def fusion_alt():
-    snap = st.poll()
-    baro = None
-    if snap is not None:
-        t_ms, ch6, baro, lat, lon, roll, pitch, yaw = snap
-    
-    ultra, age = ultra_reader.latest()
-    t = time.time()
-
-    if ultra == 0:
-        return baro
-    if ultra <= 1.5:
-        return ultra
-    elif ultra < 2.0:
-        return ultra * 0.6 + baro * 0.4
-    return baro
-
 def wait_to_takeoff():
     st.start_stream()
     is_start = True
@@ -112,29 +95,32 @@ def wait_to_takeoff():
             fc.set_mode_guided()
             is_start = False
         if snap is not None:
-            t_ms, ch6, baro, lat, lon, roll, pitch, yaw = snap
+            ch6 = snap[1]
             if ch6 == 2000:
                 send_mode("Take off")
                 break
         time.sleep(0.02)
 
-def takeoff(alt):
+def takeoff(des_alt):
     fc.arm()
-    time.sleep(1.5)
-    fc.takeoff(alt)
+    fc.takeoff(des_alt)
     while True:
         snap = st.poll()
-        baro = None
         if snap is not None:
-            t_ms, ch6, baro, lat, lon, roll, pitch, yaw = snap
-        if baro >= 0.95*alt:
-            time.sleep(1)
-            send_mode("Following")
+            alt = snap[2]
+        if alt >= 0.95*des_alt:
             break
         time.sleep(0.02)
     print("HOVER")
     f.write("MODE: HOVER\n")
-    time.sleep(3)
+    while True:
+        ch6 = st.poll()[1]
+        print(ch6)
+        if ch6 == 1000:
+            break
+        else:
+            time.sleep(0.02)
+    send_mode("Following")
     print("FOLLOWING")
     f.write("MODE: FOLLOWING\n")
     
@@ -150,20 +136,10 @@ def close():
         send_mode("Stop")
 
 if __name__ == "__main__":
-    ultra_reader = None
     try:
         m, f = connect()
         st = state(m, f)
         fc = FlightController(m, f)
-        # ==== Start ultrasonic thread ====
-        ultra_reader = UltrasonicReader(
-            port="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
-            baudrate=9600,
-            timeout=0.05,
-            min_valid_m=0.05,   # lọc 0.0 / nhiễu nhỏ
-            max_valid_m=4.0,    # dưới 2m luôn dùng siêu âm
-        )
-        ultra_reader.start()
 
         wait_to_takeoff()
         takeoff(2.5) #cất cánh lên 2.5m
@@ -171,23 +147,24 @@ if __name__ == "__main__":
         t0 = time.time()
         while time.time() - t0 < 60: #Thời gian detect
             pkt, dt, d_flag = recv_udp()
-            dz = fusion_alt()
+            dz = st.poll()[2]
             fc.update_pid_from_keyboard()
-            if dz < 0.6:
-                if (abs(pkt["dx"]) < 64.0) and (abs(pkt["dy"]) < 48.0) and (pkt["found"] == True):
-                    send_mode("Landing 0.6")
+            if dz < 0.9:
+                if (abs(pkt["dx"]) < 50.0) and (abs(pkt["dy"]) < 40.0) and (pkt["found"] == True):
+                    send_mode("Landing 1.0")
                     t0 = time.time()
                     while time.time() - t0 < 3:
-                        dz = fusion_alt()
+                        dz = st.poll()[2]
                         if dz < 0.2:
                             break
                         fc.send_body_velocity(0,0,0.4)
-                        time.sleep(0.1)
+                        time.sleep(0.02)
                     break
 
                 else:
                     if d_flag:
                         vx, vy, vz = fc.pid_compute(pkt["dx"], pkt["dy"], dz, dt, pkt["found"])
+                        print(f"time:{time.time():.1f}, dx:{pkt['dx']}, vx:{vx:.2f}\tdy:{pkt['dy']}, vy:{vy:.2f}\tdz:{dz:.2f}, vz0")
                         fc.send_body_velocity(vx, vy, 0)
             else:
                 if d_flag:
@@ -200,14 +177,6 @@ if __name__ == "__main__":
     except Exception as e:
         f.write(f"Lỗi xảy ra: {e}\n")
     finally:
-        landing()
-        
-        # stop ultrasonic thread
-        if ultra_reader is not None:
-            try:
-                ultra_reader.stop()
-            except Exception:
-                pass
-        
+        landing()        
         close()
 
